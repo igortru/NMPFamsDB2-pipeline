@@ -172,7 +172,7 @@ The two other phiX174 genes that cross the NCBI origin (NP_040704.1, NP_040705.1
 Open points for a full IMG/VR run:
 
 - Proviruses cut from host contigs also have ends that are not assembly ends; step 3 still filters them as linear sequences.
-- Download: `download_imgvr.sh OUTDIR [TOKEN_FILE]` fetches the v4.1 full set (`IMG_VR_2022-09-20_7`: nucleotides 48.32 GB, proteins 31.48 GB, sequence table 5.05 GB, README) from the JGI Data Portal and checks each md5. The file listing is public, but every download returns HTTP 401 without a JGI account token, so the script reads the token from a file (default `~/.jgi_token`).
+- Download: `download_imgvr.sh OUTDIR [TOKEN_FILE]` fetches the v4.1 full set (`IMG_VR_2022-12-19_7`: nucleotides 48.32 GB, proteins 31.48 GB, sequence table 5.05 GB, README) from the JGI Data Portal and checks each md5. The file listing is public, but every download returns HTTP 401 without a JGI account token, so the script reads the token from a file (default `~/.jgi_token`).
 - Whether IMG/VR proteins overlap the IMG/M metagenome proteins already used for NMPFamsDB2 has not been checked.
 
 ## Test data and file locations (local)
