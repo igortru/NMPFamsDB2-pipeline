@@ -8,7 +8,7 @@ The NMPFamsDB2 pipeline now runs end to end on macOS and Linux with eight correc
 
 - **Corrected:** contig join order, low-complexity filter, Pfam hit parsing, join sort order, DIAMOND input file, DIAMOND coverage, alignment trimming guide, macOS multiprocessing in all three scripts, DIAMOND database naming.
 - **Added from the paper:** AntiFam filter, LAST before DIAMOND, family profile generation, the 16-sequence cutoff, ColabFold prediction, Foldseek search, structural superfamilies.
-- **Files changed:** `commands.md`, `aligner.py`, `trimmer.py`, `redundancy_removal.py`; added `Dockerfile` and this file.
+- **Files changed:** `commands.md`, `aligner.py`, `trimmer.py`, `redundancy_removal.py`; added `Dockerfile`, `imgvr_to_pipeline.py` and this file.
 
 The `Dockerfile` builds a linux/amd64 image with every tool below at the tested version (11.1 GB; all tools respond inside the image). BLAST+ 2.17.0 has no linux-aarch64 build on bioconda, so the image is pinned to amd64. The original repository is kept as the `upstream` remote.
 
@@ -29,6 +29,7 @@ All tests ran on macOS arm64 in the conda env `nmpfams`; ColabFold has its own e
 | ColabFold | 1.5.5 | structure prediction (options checked, not run) |
 | BLAST+ | 2.17.0 | remote ClusteredNR search |
 | Python | 3.11, pandas 3.0.6, scikit-learn 1.9.1 | the three scripts |
+| pyrodigal-gv | 0.3.2 | gene prediction for IMG/VR input |
 
 | Database | Version | Check |
 | --- | --- | --- |
@@ -132,6 +133,34 @@ Four details are not specified in the paper and are choices made in `commands.md
 One observation on the paper's structural hit rule: an alignment TM-score above 0.5 can come from a short alignment between unrelated proteins. In the test, ubiquitin (1UBQ) against crambin (1CRN) scored 0.546, with query- and target-normalised TM-scores of 0.17 and 0.27 and an E-value of 1.2. The rule is implemented as the paper states it; an added E-value or normalised TM-score condition would remove such hits.
 
 Not in `commands.md`: the paper's taxonomy (Kraken2, MMseqs2 taxonomy, Whokaryote, EukRep, geNomad), gene-neighbourhood and biome analyses.
+
+## IMG/VR input (`imgvr_to_pipeline.py`)
+
+`imgvr_to_pipeline.py` converts an IMG/VR nucleotide FASTA into the two input tables the pipeline reads, `scaffolds_info.tsv` and `protein.tsv`. It uses only the nucleotide FASTA: contig lengths are computed and genes predicted with pyrodigal-gv 0.3.2 (Prodigal with viral genetic-code models, meta mode). IMG/VR's own protein FASTA is not used, because its header layout (whether it carries gene coordinates) has not been checked.
+
+```bash
+python imgvr_to_pipeline.py IMGVR_all_nucleotides.fna.gz imgvr_input/ --threads 16 --first-field
+# then run commands.md from Filtering, Step 1, inside imgvr_input/
+```
+
+- IDs: scaffold `IMGVR|<uvig>`, protein `IMGVR|<uvig>|<uvig>_<n>`, the three-part layout step 2 expects. `<uvig>` is the header's first token with `|` replaced by `_`; with `--first-field`, the text before the first `|`. The run stops on a duplicate ID.
+- Coordinates are 1-based with start < end on both strands; the stop codon is not included in the protein.
+
+Test on three NCBI phage genomes with IMG/VR-style `|` headers (the real IMG/VR header layout was not available):
+
+| Genome | Length (bp) | Genes predicted | CDS annotated in NCBI |
+| --- | --- | --- | --- |
+| lambda, NC_001416.1 | 48,502 | 62 | 73 |
+| T4, NC_000866.4 | 168,903 | 265 | 278 |
+| phiX174, NC_001422.1 | 5,386 | 8 | 11 |
+
+Through `commands.md` steps 1–4 the 335 predicted proteins gave 334 (≥35 aa), 334 (contig ≥500 bp), 331 (contig-end filter), 330 (low-complexity filter). Conversion took 1.75 CPU-s for the 222,791 bp.
+
+Open points for a full IMG/VR run:
+
+- The contig-end filter (step 3) removed 3 genes from these complete genomes. IMG/VR contains complete circular genomes and proviruses cut from host contigs, whose ends are often not assembly ends, so this filter can drop intact genes; skipping step 3 for IMG/VR is an option.
+- Download: the JGI Data Portal returned no IMG/VR files to an anonymous search; a JGI account appears to be needed. Release names on the IMG/VR page: `IMG_VR_2022-09-20_7` (v4.1, all sequences) and `IMG_VR_2022-09-20_7.1` (high-confidence).
+- Whether IMG/VR proteins overlap the IMG/M metagenome proteins already used for NMPFamsDB2 has not been checked.
 
 ## Test data and file locations (local)
 

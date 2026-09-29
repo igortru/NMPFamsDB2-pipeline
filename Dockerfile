@@ -18,12 +18,13 @@ RUN micromamba create -y -n nmpfams -c conda-forge -c bioconda \
         foldseek=10.941cd33 \
         blast=2.17.0 \
         lbzip2=2.5 \
+        pyrodigal-gv=0.3.2 \
     && micromamba create -y -n colabfold -c conda-forge -c bioconda \
         python=3.11 \
         colabfold=1.5.5 \
     && micromamba clean -a -y
 
-COPY --chown=$MAMBA_USER:$MAMBA_USER aligner.py trimmer.py redundancy_removal.py parser.sh commands.md README.md /opt/NMPFamsDB2/
+COPY --chown=$MAMBA_USER:$MAMBA_USER aligner.py trimmer.py redundancy_removal.py imgvr_to_pipeline.py parser.sh commands.md CHANGES.md README.md /opt/NMPFamsDB2/
 
 ENV PATH=/opt/conda/envs/nmpfams/bin:$PATH \
     MPLCONFIGDIR=/tmp/mpl
