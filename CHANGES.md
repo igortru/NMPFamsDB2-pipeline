@@ -159,7 +159,7 @@ Through `commands.md` steps 1–4 the 335 predicted proteins gave 334 (≥35 aa)
 Open points for a full IMG/VR run:
 
 - The contig-end filter (step 3) removed 3 genes from these complete genomes. IMG/VR contains complete circular genomes and proviruses cut from host contigs, whose ends are often not assembly ends, so this filter can drop intact genes; skipping step 3 for IMG/VR is an option.
-- Download: the JGI Data Portal returned no IMG/VR files to an anonymous search; a JGI account appears to be needed. Release names on the IMG/VR page: `IMG_VR_2022-09-20_7` (v4.1, all sequences) and `IMG_VR_2022-09-20_7.1` (high-confidence).
+- Download: `download_imgvr.sh OUTDIR [TOKEN_FILE]` fetches the v4.1 full set (`IMG_VR_2022-09-20_7`: nucleotides 48.32 GB, proteins 31.48 GB, sequence table 5.05 GB, README) from the JGI Data Portal and checks each md5. The file listing is public, but every download returns HTTP 401 without a JGI account token, so the script reads the token from a file (default `~/.jgi_token`).
 - Whether IMG/VR proteins overlap the IMG/M metagenome proteins already used for NMPFamsDB2 has not been checked.
 
 ## Test data and file locations (local)
