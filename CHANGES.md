@@ -136,7 +136,7 @@ Not in `commands.md`: the paper's taxonomy (Kraken2, MMseqs2 taxonomy, Whokaryot
 
 ## IMG/VR input (`imgvr_to_pipeline.py`)
 
-`imgvr_to_pipeline.py` converts an IMG/VR nucleotide FASTA into the two input tables the pipeline reads, `scaffolds_info.tsv` and `protein.tsv`. It uses only the nucleotide FASTA: contig lengths are computed and genes predicted with pyrodigal-gv 0.3.2 (Prodigal with viral genetic-code models, meta mode). IMG/VR's own protein FASTA is not used, because its header layout (whether it carries gene coordinates) has not been checked.
+`imgvr_to_pipeline.py` converts an IMG/VR nucleotide FASTA into the two input tables the pipeline reads, `scaffolds_info.tsv` (ID, length, topology) and `protein.tsv`. It uses only the nucleotide FASTA: contig lengths are computed and genes predicted with pyrodigal-gv 0.3.2 (Prodigal with viral genetic-code models, meta mode). IMG/VR's own protein FASTA is not used, because its header layout (whether it carries gene coordinates) has not been checked.
 
 ```bash
 python imgvr_to_pipeline.py IMGVR_all_nucleotides.fna.gz imgvr_input/ --threads 16 --first-field
@@ -156,9 +156,22 @@ Test on three NCBI phage genomes with IMG/VR-style `|` headers (the real IMG/VR 
 
 Through `commands.md` steps 1–4 the 335 predicted proteins gave 334 (≥35 aa), 334 (contig ≥500 bp), 331 (contig-end filter), 330 (low-complexity filter). Conversion took 1.75 CPU-s for the 222,791 bp.
 
+### Circular sequences
+
+The converter calls a sequence circular when its end repeats its start (a direct terminal repeat of at least 20 bp, `--min-dtr`, the criterion CheckV and geNomad use); whether the IMG/VR sequence table has a topology column has not been checked. For a circular sequence the repeat copy is removed, genes are predicted on the sequence joined to itself, and only complete genes that start in the first copy are kept, so a gene across the origin is predicted whole and written with start > end. `scaffolds_info.tsv` gets a third column (`circular` / `linear`), and `commands.md` step 3 skips the contig-end filter for `circular` scaffolds; two-column IMG/M input is filtered as before.
+
+Test: phiX174 (5,386 bp) rotated so the origin falls inside gene A, once with a 50 bp terminal repeat and once without.
+
+| Copy | Topology called | Genes | Gene A (NCBI NP_040703.1, 513 aa) | Genes kept by step 3 |
+| --- | --- | --- | --- | --- |
+| with 50 bp repeat | circular | 7 | predicted whole, identical, wraps 4686 → 841 | 7 of 7 |
+| without repeat | linear | 8 | not predicted whole | 6 of 8 |
+
+The two other phiX174 genes that cross the NCBI origin (NP_040704.1, NP_040705.1) overlap gene A and are not predicted in either mode. The three linear test phages give the same `protein.tsv` as before the change.
+
 Open points for a full IMG/VR run:
 
-- The contig-end filter (step 3) removed 3 genes from these complete genomes. IMG/VR contains complete circular genomes and proviruses cut from host contigs, whose ends are often not assembly ends, so this filter can drop intact genes; skipping step 3 for IMG/VR is an option.
+- Proviruses cut from host contigs also have ends that are not assembly ends; step 3 still filters them as linear sequences.
 - Download: `download_imgvr.sh OUTDIR [TOKEN_FILE]` fetches the v4.1 full set (`IMG_VR_2022-09-20_7`: nucleotides 48.32 GB, proteins 31.48 GB, sequence table 5.05 GB, README) from the JGI Data Portal and checks each md5. The file listing is public, but every download returns HTTP 401 without a JGI account token, so the script reads the token from a file (default `~/.jgi_token`).
 - Whether IMG/VR proteins overlap the IMG/M metagenome proteins already used for NMPFamsDB2 has not been checked.
 

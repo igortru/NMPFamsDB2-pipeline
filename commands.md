@@ -87,9 +87,11 @@ Genes beginning within 10 nucleotides of the scaffold start or ending within 10 
 LC_ALL=C sort -t $'\t' -k1,1 scaffolds_info.tsv > sorted_scaffolds_info.tsv
 LC_ALL=C sort -t $'\t' -k1,1 filtered_step2_proteins.tsv \
 | LC_ALL=C join -t $'\t' -1 1 -2 1 - sorted_scaffolds_info.tsv \
-| awk -F '\t' '$4 > 10 && $5 < $6 - 10 {print $1"\t"$2"\t"$3}' \
+| awk -F '\t' '$7 == "circular" || ($4 > 10 && $5 < $6 - 10) {print $1"\t"$2"\t"$3}' \
 > filtered_step3_proteins.tsv
 ```
+
+An optional third column `circular` in `scaffolds_info.tsv` (written by `imgvr_to_pipeline.py` for sequences with a direct terminal repeat) exempts that scaffold from this filter: a circular sequence has no ends. IMG/M input has two columns and is filtered as before.
 
 Convert the filtered proteins to FASTA.
 
