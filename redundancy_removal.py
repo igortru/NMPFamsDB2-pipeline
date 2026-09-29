@@ -98,15 +98,17 @@ def parallelize(chunks, number_of_files):
         print(r, file=stderr)
 
 
-script, list_of_chunks = argv
+# guard required for multiprocessing "spawn" start method (macOS/Windows default)
+if __name__ == "__main__":
+    script, list_of_chunks = argv
 
-with open(list_of_chunks, "r") as fl:
-    chunks = [i.rstrip() for i in fl]
-fl.close()
+    with open(list_of_chunks, "r") as fl:
+        chunks = [i.rstrip() for i in fl]
+    fl.close()
 
 
-number_of_files = 40
+    number_of_files = 40
 
-for i in range(0, len(chunks), number_of_files):
-    chunks_subset = chunks[i:i+number_of_files]
-    parallelize(chunks_subset, number_of_files)
+    for i in range(0, len(chunks), number_of_files):
+        chunks_subset = chunks[i:i+number_of_files]
+        parallelize(chunks_subset, number_of_files)

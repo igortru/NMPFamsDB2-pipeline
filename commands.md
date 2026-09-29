@@ -81,8 +81,12 @@ sorted_filtered_step1_proteins.tsv \
 
 Genes beginning within 10 nucleotides of the scaffold start or ending within 10 nucleotides of the scaffold end are removed.
 
+`join` requires both inputs sorted on the join key; an unsorted `scaffolds_info.tsv` silently drops proteins.
+
 ```bash
-join -t $'\t' -1 1 -2 1 filtered_step2_proteins.tsv scaffolds_info.tsv \
+LC_ALL=C sort -t $'\t' -k1,1 scaffolds_info.tsv > sorted_scaffolds_info.tsv
+LC_ALL=C sort -t $'\t' -k1,1 filtered_step2_proteins.tsv \
+| LC_ALL=C join -t $'\t' -1 1 -2 1 - sorted_scaffolds_info.tsv \
 | awk -F '\t' '$4 > 10 && $5 < $6 - 10 {print $1"\t"$2"\t"$3}' \
 > filtered_step3_proteins.tsv
 ```
@@ -123,26 +127,11 @@ END {
 > masked_low_complexity_region.tsv
 ```
 
-Proteins containing a run of ten consecutive masked residues (`XXXXXXXXXX`) are retained unchanged.
+Retain proteins with at least 35 unmasked amino acids. The masked sequence (with X) is kept as-is; stripping X joins the flanking segments and breaks alignments to reference proteins.
 
 ```bash
-grep "XXXXXXXXXX" masked_low_complexity_region.tsv \
-> keep_proteins1.tsv
-```
-
-For the remaining proteins, remove masked residues and retain only sequences that remain at least 35 amino acids long.
-
-```bash
-grep -v "XXXXXXXXXX" masked_low_complexity_region.tsv \
-| sed 's/X//g' \
-| awk 'length($2)>=35 {print $1"\t"$2}' \
-> keep_proteins2.tsv
-```
-
-Combine the retained proteins.
-
-```bash
-cat keep_proteins1.tsv keep_proteins2.tsv \
+awk -F '\t' '{s=$2; n=gsub(/X/,"",s); if (length(s)>=35) print $1"\t"$2}' \
+masked_low_complexity_region.tsv \
 > final_filtered_proteins.tsv
 ```
 
@@ -157,10 +146,11 @@ awk '{print ">"$1"\n"$2}' final_filtered_proteins.tsv \
 
 # Searching
 
-A protein was classified as **novel** if it showed no detectable matches to either:
+A protein was classified as **novel** if it showed no detectable matches to any of:
 
 * Pfam (v37)
-* the IMG/M reference protein collection
+* AntiFam (spurious-protein families)
+* the IMG/M reference protein collection (LAST, then DIAMOND)
 
 ---
 
@@ -208,21 +198,41 @@ After all searches completed, the `*.domtblout` files were merged into a single 
 | 22 | Alignment accuracy |
 | 23 | Target description |
 
-## Collect Pfam hits
+# Search against AntiFam
+
+The same search is run against AntiFam. AntiFam models carry gathering thresholds (GA) only, so `--cut_ga` is used as recommended in the AntiFam release notes (`--cut_tc` fails: "TC bit thresholds unavailable").
 
 ```bash
-awk -F '\t' '{print $1}' final_hmmresults.domtblout \
-| sort \
+hmmsearch \
+    --cut_ga \
+    --cpu 45 \
+    --domtblout antifam_chunkx.domtblout \
+    -o antifam_chunkx.hmmout \
+    AntiFam.hmm \
+    chunkx.fa
+```
+
+Merge the AntiFam `*.domtblout` files into `final_antifam.domtblout`.
+
+## Collect Pfam and AntiFam hits
+
+`domtblout` is space-delimited and contains `#` comment lines; split on whitespace and skip comments.
+
+```bash
+cat final_hmmresults.domtblout final_antifam.domtblout \
+| grep -v '^#' \
+| awk '{print $1}' \
+| LC_ALL=C sort -u \
 > protein_Pfam_hits.txt
 ```
 
-## Remove Pfam hits
+## Remove Pfam and AntiFam hits
+
+`final_filtered_proteins.tsv` is not sorted; `join` needs both inputs sorted in the same (C) order, otherwise Pfam hits leak through.
 
 ```bash
-join -t $'\t' -v 1 -1 1 -2 1 \
-final_filtered_proteins.tsv \
-protein_Pfam_hits.txt \
-| sort -k1,1 \
+LC_ALL=C sort -t $'\t' -k1,1 final_filtered_proteins.tsv \
+| LC_ALL=C join -t $'\t' -v 1 -1 1 -2 1 - protein_Pfam_hits.txt \
 > pfam_novel_proteins.tsv
 ```
 
@@ -244,26 +254,65 @@ Reference proteins are stored in four FASTA files:
 * `eukarya.fa`
 * `viruses.fa`
 
-Each database is searched independently.
+Two sequential searches are used with the same hit criteria (≥30% identity, ≥70% query and subject coverage): LAST first, then DIAMOND on the proteins with no LAST hit.
 
-## Create DIAMOND database
+## LAST search
+
+The paper gives the thresholds but not the LAST command line; the options below (protein database `-p`, BLAST-like tabular output with query/subject lengths) are this repository's choice. `BlastTab+` columns 1–14 are the same as the DIAMOND `--outfmt 6` columns used below, so the same hit filter applies.
 
 ```bash
-diamond makedb \
-    --in input.fa \
-    -d nr
+lastdb -p -c -P 45 refDB bacteria.fa archaea.fa eukarya.fa viruses.fa
+
+lastal -P 45 -f BlastTab+ refDB pfam_novel_proteins.fa \
+| grep -v '^#' \
+> last_matches.tsv
+
+awk -F '\t' '{
+    if ($3>=30 &&
+        (($8-$7+1)/$13)>=0.7 &&
+        (($10-$9+1)/$14)>=0.7)
+    print $1
+}' last_matches.tsv \
+| LC_ALL=C sort -u \
+> last_hits_ids
+
+LC_ALL=C join -t $'\t' -v 1 -1 1 -2 1 \
+pfam_novel_proteins.tsv \
+last_hits_ids \
+> last_novel_proteins.tsv
+
+awk '{print ">"$1"\n"$2}' last_novel_proteins.tsv \
+> last_novel_proteins.fa
+```
+
+## Create DIAMOND databases
+
+One database per reference file (a shared name would overwrite the previous one).
+
+```bash
+for db in bacteria archaea eukarya viruses; do
+    diamond makedb \
+        --in ${db}.fa \
+        -d ${db}
+done
 ```
 
 ## Search proteins
 
+Search each database and merge the results.
+
 ```bash
-diamond blastp \
-    -d nr.dmnd \
-    -q pfam_novel_proteins.fa \
-    -o matches.m8 \
-    --outfmt 6 \
-    qseqid sseqid pident length mismatch gapopen \
-    qstart qend sstart send evalue bitscore qlen slen
+for db in bacteria archaea eukarya viruses; do
+    diamond blastp \
+        -d ${db}.dmnd \
+        -q last_novel_proteins.fa \
+        -o matches_${db}.m8 \
+        --outfmt 6 \
+        qseqid sseqid pident length mismatch gapopen \
+        qstart qend sstart send evalue bitscore qlen slen
+done
+cat matches_bacteria.m8 matches_archaea.m8 matches_eukarya.m8 matches_viruses.m8 \
+> matches.m8
 ```
 
 ### Hit criteria
@@ -279,19 +328,19 @@ Collect matching protein IDs.
 ```bash
 awk '{
     if ($3>=30 &&
-        (($8-$7)/$13)>=0.7 &&
-        (($10-$9)/$14)>=0.7)
+        (($8-$7+1)/$13)>=0.7 &&
+        (($10-$9+1)/$14)>=0.7)
     print $1
-}' output_table \
-| sort -k1,1 \
+}' matches.m8 \
+| LC_ALL=C sort -u \
 > reference_hits_ids
 ```
 
-Remove reference hits.
+Remove reference hits (`last_novel_proteins.tsv` is already C-sorted).
 
 ```bash
-join -t $'\t' -v 1 -1 1 -2 1 \
-pfam_novel_proteins.tsv \
+LC_ALL=C join -t $'\t' -v 1 -1 1 -2 1 \
+last_novel_proteins.tsv \
 reference_hits_ids \
 > novel_proteins.tsv
 ```
@@ -328,4 +377,122 @@ Export cluster assignments.
 
 ```bash
 mmseqs createtsv seqDB seqDB cluDB cluDB.tsv
+```
+
+---
+
+# Profile generation (families with ≥100 members)
+
+Build a family table (`cluster \t member \t sequence`) for clusters with at least 100 members. `cluDB.tsv` has `representative \t member`.
+
+```bash
+awk -F '\t' '{n[$1]++} END{for (c in n) if (n[c]>=100) print c}' cluDB.tsv \
+| LC_ALL=C sort > families100.txt
+
+LC_ALL=C sort -t $'\t' -k1,1 cluDB.tsv \
+| LC_ALL=C join -t $'\t' - families100.txt \
+| LC_ALL=C sort -t $'\t' -k2,2 \
+| LC_ALL=C join -t $'\t' -1 2 -2 1 -o 1.1,1.2,2.2 - novel_proteins.tsv \
+| LC_ALL=C sort -t $'\t' -k1,1 \
+> families100.tsv
+```
+
+Split by family into chunks (all rows of a family in the same chunk), then run the three scripts in order. Each takes a text file listing chunk paths and writes TSV to stdout.
+
+```bash
+python aligner.py chunks.txt > aligned.tsv              # MAFFT per family
+# re-chunk aligned.tsv by family -> aligned_chunks.txt
+python trimmer.py aligned_chunks.txt > trimmed.tsv      # central-sequence column trimming
+# re-chunk trimmed.tsv by family -> trimmed_chunks.txt
+python redundancy_removal.py trimmed_chunks.txt > filtered.tsv   # hhfilter -id 95 -cov 70
+```
+
+## Keep families with ≥16 sequences after filtering
+
+The paper retains "families with at least 16 effective sequences after filtering", described as "the minimum number of sequences per MSA". Here this is taken as the number of sequences left after `hhfilter`; the paper does not give a formula (HH-suite's `hhmake` NEFF is a different, smaller number). Each family is written as an A3M file (the last column of `filtered.tsv`), first sequence = central sequence.
+
+```bash
+mkdir -p a3m
+awk -F '\t' 'NF>=5 {n[$1]++} END{for (c in n) if (n[c]>=16) print c}' filtered.tsv > families_neff16.txt
+awk -F '\t' 'NR==FNR {keep[$1]=1; next}
+             NF>=5 && ($1 in keep) {f="a3m/"$1".a3m"; if (f!=prev) {if (prev) close(prev); prev=f}
+                                    print ">"$2"\n"$NF > f}' \
+    families_neff16.txt filtered.tsv
+```
+
+---
+
+# Structure prediction (ColabFold)
+
+ColabFold implementation of AlphaFold2 in de novo mode (no `--templates`), family A3M as input MSA, five models, three recycles. Models are ranked by pTM; the rank-1 model is kept (the paper selects the model with the highest average pTM and best average pLDDT).
+
+```bash
+colabfold_batch \
+    --model-type alphafold2_ptm \
+    --num-models 5 \
+    --num-recycle 3 \
+    --rank ptm \
+    a3m/ colabfold_out/
+```
+
+Collect the rank-1 pTM per family and classify: HQ pTM ≥ 0.7, MQ 0.5 ≤ pTM < 0.7, LQ pTM < 0.5. Only HQ and MQ models go to the structural search.
+
+```bash
+for j in colabfold_out/*_scores_rank_001_*.json; do
+    fam=$(basename "$j" | sed 's/_scores_rank_001_.*//')
+    python -c "import json,sys; d=json.load(open(sys.argv[1])); print(sys.argv[2], d['ptm'], sum(d['plddt'])/len(d['plddt']))" "$j" "$fam"
+done > model_scores.tsv
+
+awk '$2>=0.5 {print $1}' model_scores.tsv > models_hq_mq.txt
+
+mkdir -p models
+while read -r fam; do
+    cp colabfold_out/${fam}_unrelaxed_rank_001_*.pdb models/${fam}.pdb
+done < models_hq_mq.txt
+```
+
+---
+
+# Structural homology search (Foldseek)
+
+HQ/MQ models (rank-1 PDB files in `models/`) are searched against CATH and PDB. Foldseek's prebuilt `CATH50` and `PDB` databases are used here; the paper used CATH v4.4 and PDB assemblies (March 2024), so versions differ.
+
+```bash
+foldseek databases CATH50 cathDB tmp
+foldseek databases PDB pdbDB tmp
+
+for db in cathDB pdbDB; do
+    foldseek easy-search models/ ${db} ${db}_hits.tsv tmp \
+        --format-output query,target,alntmscore,qtmscore,ttmscore,qlen,tlen,evalue
+done
+```
+
+Hit rule as described in the paper: alignment TM-score > 0.5; otherwise, if the query is shorter than the target, query-normalised TM-score ≥ 0.5; if the target is shorter, target-normalised TM-score ≥ 0.5.
+
+```bash
+cat cathDB_hits.tsv pdbDB_hits.tsv \
+| awk -F '\t' '$3>0.5 || ($6<$7 && $4>=0.5) || ($7<$6 && $5>=0.5) {print $1}' \
+| LC_ALL=C sort -u > structural_hits.txt
+```
+
+Models without a CATH/PDB hit are searched against AlphaFoldDB the same way.
+
+```bash
+foldseek databases Alphafold/UniProt50 afdb tmp
+ls models/ | sed 's/\.pdb$//' | LC_ALL=C sort \
+| LC_ALL=C comm -23 - structural_hits.txt > no_exp_hit.txt
+# copy the models listed in no_exp_hit.txt to models_noexp/, then:
+foldseek easy-search models_noexp/ afdb afdb_hits.tsv tmp \
+    --format-output query,target,alntmscore,qtmscore,ttmscore,qlen,tlen,evalue
+```
+
+## Superfamilies
+
+Foldseek clustering in bidirectional mode, 80% coverage, TM-score 0.5.
+
+```bash
+foldseek easy-cluster models/ superfamilies tmp \
+    -c 0.8 \
+    --cov-mode 0 \
+    --tmscore-threshold 0.5
 ```
