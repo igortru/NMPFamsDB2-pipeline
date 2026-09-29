@@ -7,7 +7,8 @@ Writes
 IDs follow the IMG/M layout the pipeline expects (commands.md step 2 splits on "|"):
   scaffold = IMGVR|<uvig>        protein = IMGVR|<uvig>|<uvig>_<n>
 <uvig> = first whitespace-separated token of the FASTA header, "|" replaced by "_";
-with --first-field, only the part before the first "|" (use when that part alone is unique).
+with --first-field, only the part before the first "|" (use when that part alone is unique);
+GVMAG genome bins share one UViG ID across contigs, so they get <uvig>__<contig>.
 
 Genes are predicted with pyrodigal-gv (Prodigal with viral genetic-code models, meta mode).
 Coordinates are 1-based, start < end on both strands; stop codon excluded from the protein.
@@ -45,7 +46,12 @@ def read_fasta(path, first_field=False):
                 if name is not None:
                     yield name, "".join(chunks)
                 tok = line[1:].split()[0] if line[1:].strip() else ""
-                name = tok.split("|")[0] if first_field else tok.replace("|", "_")
+                if first_field:
+                    f = tok.split("|")
+                    # GVMAG = genome bin: one UViG ID over several contigs, the contig is field 3
+                    name = f"{f[0]}__{f[2]}" if "_GVMAG-" in f[0] and len(f) > 2 else f[0]
+                else:
+                    name = tok.replace("|", "_")
                 chunks = []
             else:
                 chunks.append(line.strip())
